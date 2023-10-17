@@ -11,17 +11,14 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.LinkedList;
 
-
-public class OpenSSHRSACertificate {
-    private final byte[] format;
-    private final byte[] body;
+public class OpenSSHRSACertificate extends OpenSSHCertificate {
 
     /*
      * Value encoding according to
      * https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.certkeys
      * For more detailed descriptions of data types used see RFC4251 Section 5.
      */
-    private OpenSSHString keyType;
+    private final byte[] expectedKeyType = "ssh-rsa-cert-v01@openssh.com".getBytes();
     private OpenSSHString nonce;
     private OpenSSHMPInt exponent;
     private OpenSSHMPInt publicModulus;
@@ -37,37 +34,41 @@ public class OpenSSHRSACertificate {
     private OpenSSHString signatureKey;
     private OpenSSHString signature;
 
-    public OpenSSHRSACertificate(String cert) {
+    public OpenSSHRSACertificate(String cert) throws DeserializationException {
         String[] parts = cert.trim().split(" ");
-        format = parts[0].getBytes(StandardCharsets.UTF_8);
-        body = Base64.getDecoder().decode(parts[1].getBytes(StandardCharsets.UTF_8));
-        decode();
+        byte[] keyBytes = parts[1].getBytes(StandardCharsets.UTF_8);
+        Base64.Decoder decoder = Base64.getDecoder();
+        byte[] body = decoder.decode(keyBytes);
+        deserialize(body);
     }
 
-    private void decode() {
-        OpenSSHKeyBytesDecoder bytesDecoder = new OpenSSHKeyBytesDecoder(body);
-        keyType = bytesDecoder.readString();
-        nonce = bytesDecoder.readString();
-        exponent = bytesDecoder.readMPInt();
-        publicModulus = bytesDecoder.readMPInt();
-        serial = bytesDecoder.readUInt64();
-        type = bytesDecoder.readUInt32();
-        keyId = bytesDecoder.readString();
+    void deserialize(byte[] body) throws DeserializationException {
+        OpenSSHDeserializer deserializer = new OpenSSHDeserializer(body);
+        deserializer.skip4Bytes();
+        checkAlgorithmIdentifier(deserializer.readBytes(expectedKeyType.length), expectedKeyType);
+        nonce = deserializer.readString();
+        exponent = deserializer.readMPInt();
+        publicModulus = deserializer.readMPInt();
+        serial = deserializer.readUInt64();
+        type = deserializer.readUInt32();
+        keyId = deserializer.readString();
+        validPrincipals = deserializePrincipals(deserializer.readString().getValue());
+        validAfter = deserializer.readUInt64();
+        validBefore = deserializer.readUInt64();
+        criticalOptions = deserializer.readString();
+        extensions = deserializer.readString();
+        reserved = deserializer.readString();
+        signatureKey = deserializer.readString();
+        signature = deserializer.readString();
+    }
 
-        byte[] principals = bytesDecoder.readString().getValue();
-        OpenSSHKeyBytesDecoder principalsDecoder = new OpenSSHKeyBytesDecoder(principals);
-        validPrincipals = new LinkedList<>();
-        while ( ! principalsDecoder.isEmpty()) {
-            validPrincipals.add(principalsDecoder.readString());
+    LinkedList<OpenSSHString> deserializePrincipals(byte[] principals) throws DeserializationException {
+        OpenSSHDeserializer principalsDeserializer = new OpenSSHDeserializer(principals);
+        LinkedList<OpenSSHString> validPrincipals = new LinkedList<>();
+        while (!principalsDeserializer.isEmpty()) {
+            validPrincipals.add(principalsDeserializer.readString());
         }
-
-        validAfter = bytesDecoder.readUInt64();
-        validBefore = bytesDecoder.readUInt64();
-        criticalOptions = bytesDecoder.readString();
-        extensions = bytesDecoder.readString();
-        reserved = bytesDecoder.readString();
-        signatureKey = bytesDecoder.readString();
-        signature = bytesDecoder.readString();
+        return validPrincipals;
     }
 
     public boolean isValid() {
@@ -75,10 +76,6 @@ public class OpenSSHRSACertificate {
         BigInteger after = validAfter.getValue();
         BigInteger before = validBefore.getValue();
         return after.compareTo(now) < 0 && before.compareTo(now) > 0;
-    }
-
-    public OpenSSHString getKeyType() {
-        return keyType;
     }
 
     public OpenSSHString getNonce() {

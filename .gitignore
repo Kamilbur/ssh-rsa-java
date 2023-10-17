@@ -1,3 +1,7 @@
+# Test certificates
+user*
+*.pub
+
 # Compiled class file
 *.class
 
@@ -100,3 +104,5 @@ fabric.properties
 
 # Android studio 3.1+ serialized cache file
 .idea/caches/build_file_checksums.ser
+
+.idea

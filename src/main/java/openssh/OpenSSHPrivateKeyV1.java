@@ -10,7 +10,7 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedList;
 
-public class OpenSSHPrivateKey  extends OpenSSHKey {
+public class OpenSSHPrivateKeyV1 extends OpenSSHKey {
     private static final String MARK_BEGIN = "-----BEGIN OPENSSH PRIVATE KEY-----";
     private static final String MARK_END = "-----END OPENSSH PRIVATE KEY-----";
     private static final byte[] expectedAlgorithmIdentifier = "openssh-key-v1\0".getBytes(StandardCharsets.UTF_8);
@@ -29,19 +29,24 @@ public class OpenSSHPrivateKey  extends OpenSSHKey {
             "ssh-rsa"
     ));
 
-    public OpenSSHPrivateKey(String key) throws DeserializationException {
+    public OpenSSHPrivateKeyV1(String key) throws DeserializationException {
         byte[] keyBytes = key.replace(MARK_BEGIN, "")
                 .replace(MARK_END, "")
                 .replace("\n", "")
                 .getBytes(StandardCharsets.UTF_8);
         Base64.Decoder decoder = Base64.getDecoder();
         byte[] body = decoder.decode(keyBytes);
-        deserialize(body);
+        try {
+            deserialize(body);
+        } catch (IndexOutOfBoundsException ignored) {
+            throw new DeserializationException("Passed data does not match key data format");
+        }
     }
 
-    void deserialize(byte[] body) throws DeserializationException {
+    void deserialize(byte[] body) throws IndexOutOfBoundsException, DeserializationException {
         OpenSSHDeserializer deserializer = new OpenSSHDeserializer(body);
-        checkAlgorithmIdentifier(deserializer.readBytes(expectedAlgorithmIdentifier.length), expectedAlgorithmIdentifier);
+        byte[] actualAlgorithmIdentifier = deserializer.readBytes(expectedAlgorithmIdentifier.length);
+        checkAlgorithmIdentifier(actualAlgorithmIdentifier, expectedAlgorithmIdentifier);
         ciphername = deserializer.readString();
         kdfname = deserializer.readString();
         kdfoptions = deserializer.readString();
@@ -49,7 +54,7 @@ public class OpenSSHPrivateKey  extends OpenSSHKey {
         encrypted = deserializer.readString();
     }
 
-    private LinkedList<OpenSSHPublicKey> deserializePublicKeys(OpenSSHDeserializer deserializer) throws DeserializationException {
+    private LinkedList<OpenSSHPublicKey> deserializePublicKeys(OpenSSHDeserializer deserializer) throws IndexOutOfBoundsException, DeserializationException {
         long numberOfPublicKeys = deserializer.readUInt32().getValue().longValue();
         LinkedList<OpenSSHPublicKey> publicKeys = new LinkedList<>();
         for (long i = 0; i < numberOfPublicKeys; i++) {
@@ -59,13 +64,16 @@ public class OpenSSHPrivateKey  extends OpenSSHKey {
         return publicKeys;
     }
 
-    private OpenSSHPublicKey deserializePublicKey(byte[] publicKeyBytes) throws DeserializationException {
+    private OpenSSHPublicKey deserializePublicKey(byte[] publicKeyBytes) throws IndexOutOfBoundsException, DeserializationException {
         OpenSSHDeserializer deserializer = new OpenSSHDeserializer(publicKeyBytes);
         deserializer.skip4Bytes();
         return OpenSSHKeyFactory.generatePublic(deserializer.getRest());
     }
 
     public void getPrivateKeys(String passphrase) throws DeserializationException {
+        /*
+         * TODO: Proper reading of private keys
+         */
         OpenSSHDeserializer encryptedBytesDecoder = new OpenSSHDeserializer(encrypted.getValue());
         OpenSSHUInt32 checkInt1 = encryptedBytesDecoder.readUInt32();
 
@@ -74,7 +82,7 @@ public class OpenSSHPrivateKey  extends OpenSSHKey {
 
         OpenSSHUInt32 checkInt2 = encryptedBytesDecoder.readUInt32();
         if ( ! checkInt1.getValue().equals(checkInt2.getValue())) {
-            throw new IllegalArgumentException("Not valid openssh private key");
+            throw new IllegalArgumentException("Not valid main.openssh private key");
         }
 
         encryptedBytesDecoder.skip4Bytes();
